@@ -79,13 +79,12 @@ USAGE
         parser.add_argument("-m", "--model_name", action="store", help="Set the file name of the model (ignored in crossval mode)")
         parser.add_argument("-f", "--folds_file", action="store", help="Name of folds CSV file (ignored unless running in crossval mode)")
         parser.add_argument("corpus_dir", action="store", help="Name of corpus directory to traverse")
+        parser.add_argument("-e", "--epochs", action="store", type=int, default=100, help="Set the number of epochs to train for, default 100")
         
         
         #parser.add_argument(dest="paths", help="paths to folder(s) with source file(s) [default: %(default)s]", metavar="path", nargs='+')
         
         parser.add_argument("-v", "--verbose", dest="verbose", action="store_true", help="set verbosity level [default: %(default)s]")
-        parser.add_argument("-i", "--include", dest="include", help="only include paths matching this regex pattern. Note: exclude is given preference over include. [default: %(default)s]", metavar="RE" )
-        parser.add_argument("-e", "--exclude", dest="exclude", help="exclude paths matching this regex pattern. [default: %(default)s]", metavar="RE" )
         parser.add_argument('-V', '--version', action='version', version=program_version_message)
         
 
@@ -97,6 +96,8 @@ USAGE
             logging.debug("Verbose mode on")
         else:
             logging.basicConfig(level=logging.INFO)
+            
+        logging.getLogger("requests").setLevel(logging.WARNING)
 
             
         if args.corpus_dir == None:
@@ -107,24 +108,50 @@ USAGE
             logging.error("Invalid corpus directory %s", args.corpus_dir)
             return 3
         
-        if args.action == "train":
-            all_files = []
+        all_files = []
+        for root, _, files in os.walk(args.corpus_dir):
             
-            for root, dirs, files in os.walk(args.corpus_dir):
-                
-                if root.endswith(CACHEDIR):
-                    logging.debug("Skipping cache directory")
-                
-                for file in files:
-                    if file.endswith(".xml"):
-                        all_files.append(os.path.join(root,file))
-                        
-            from sapienta.ml.train import NNetTrainer
+            if root.endswith(CACHEDIR):
+                logging.debug("Skipping cache directory")
+                continue
             
-            trainer = NNetTrainer(args.model_name, os.path.join(args.corpus_dir, CACHEDIR))
-            
-            trainer.train(all_files)
+            for file in files:
+                if file.endswith(".xml"):
+                    all_files.append(os.path.join(root,file))
+                    
+        from sapienta.ml.train import NNetTrainer
+        
+        trainer = NNetTrainer(args.model_name, os.path.join(args.corpus_dir, CACHEDIR))
+        
 
+            
+
+        
+        if args.action == "train":
+            
+            if args.model_name == None:
+                logging.error("Must specify name of model file to save trained model to")
+                return -1
+            
+            if os.path.exists(args.model_name):
+                logging.error("The provided model path '%s' exists. Refusing to overwrite (rename it out of the way)", args.model_name)
+                return -1
+            
+            trainer.train(all_files, num_epochs=args.epochs)
+            
+        if args.action == "test":
+            
+            if args.model_name == None:
+                logging.error("Must specify name of model file to test")
+                return -1
+            
+            if not os.path.exists(args.model_name):
+                logging.error("The provided model path '%s' does not exist", args.model_name)
+                return -1
+            
+            
+            trainer.test(all_files)
+            
 
         return 0
     

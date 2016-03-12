@@ -14,6 +14,8 @@ from gensim.models.word2vec import Word2Vec
 
 from sapienta.ml.nnet import SapientaNeuralNet, CONTEXT_WINDOW, WORDVEC_SIZE, ALL_CORESCS
 
+from sapienta.ml.wordserve import WordservClient
+
 class FeatureExtractorBase:
     """This class has some reusable functions for extracting features
     """
@@ -28,7 +30,7 @@ class FeatureExtractorBase:
         else:
             self.logger = logger
 
-        self.wv = None
+        self.wv = WordservClient("localhost",5000)
             
     #------------------------------------------------------------------------------------------------
     
@@ -42,13 +44,13 @@ class FeatureExtractorBase:
 
         if os.path.exists(cachedName):
 
-            self.logger.info("Loading features from %s", cachedName)
+            self.logger.debug("Loading features from %s", cachedName)
             with open(cachedName, 'rb') as f:
                 features = pickle.load(f)
             return features
 
         else:
-            self.logger.info("Generating features for %s", file)
+            self.logger.debug("Generating features for %s", file)
 
             parser = SciXML()
             doc = parser.parse(file)
@@ -63,14 +65,11 @@ class FeatureExtractorBase:
 
                 sentence.wordvectors = []
                 
-                for word in sentence.content.split(" "):
-                    
-                    if self.wv == None:
-                        self.load_word_vectors()
-                    
-                    if word in self.wv.vocab:
-
-                        sentence.wordvectors.append(self.wv[word])
+                words = sentence.content.split(" ")
+                
+                vecs = self.wv.vector(words)
+                
+                sentence.wordvectors = [ vecs[w] for w in words ]
             
             nnet_input = self._doc2vec(processedSentences)
             
@@ -82,16 +81,16 @@ class FeatureExtractorBase:
 
             return nnet_input
         
-    def gen_context_window(self, wordvectors):
-        
-        all_context = np.zeros( (len(wordvectors), CONTEXT_WINDOW,WORDVEC_SIZE) )
-        
-        half_window = CONTEXT_WINDOW // 2
-        
-        wv = [np.zeros(WORDVEC_SIZE)] * half_window + wordvectors + [np.zeros(WORDVEC_SIZE)] * half_window
-        
-        for i in range(0, len(wordvectors)):
-            all_context[i] = np.array( wv[ i: i+CONTEXT_WINDOW ] )
+    #def gen_context_window(self, wordvectors):
+    #    
+    #    all_context = np.zeros( (len(wordvectors) * CONTEXT_WINDOW, WORDVEC_SIZE) )
+    #    
+    #    half_window = CONTEXT_WINDOW // 2
+    #    
+    #    wv = [np.zeros(WORDVEC_SIZE)] * half_window + wordvectors + [np.zeros(WORDVEC_SIZE)] * half_window
+    #    
+    #    for i in range(0, len(wordvectors)):
+    #        all_context[i] = np.array( wv[ i: i+CONTEXT_WINDOW ] )
         
     def _doc2output(self, sentences):
         
@@ -101,6 +100,8 @@ class FeatureExtractorBase:
         
         for i,x in enumerate([ sentence.corescLabel for sentence in sentences]):
             blob[i, ALL_CORESCS.index(x)] = 1
+            
+        return blob
         
                 
     def _doc2vec(self, sentences):
@@ -108,18 +109,18 @@ class FeatureExtractorBase:
         batchsize = len(sentences)
         seqlen = max([len(x.wordvectors) for x in sentences])
         
-        blob = np.zeros((batchsize, seqlen, CONTEXT_WINDOW, WORDVEC_SIZE))
+        blob = np.zeros((batchsize, seqlen, WORDVEC_SIZE))
         mask = np.zeros((batchsize,seqlen))
         
         for i, x in enumerate(sentences):
             slen = len(x.wordvectors)
-            blob[i, :slen ] = self.gen_context_window(x.wordvectors)
+            blob[i, :slen ] = x.wordvectors
             mask[i, :slen] = 1
         
         return blob, mask, self._doc2output(sentences)
         
     def load_word_vectors(self):
-        self.wv= Word2Vec.load_word2vec_format("/home/james/workspace/sapienta3/GoogleNews-vectors-negative300.bin.gz", binary=True)
+        self.wv= Word2Vec.load_word2vec_format("/opt/GoogleNews-vectors-negative300.bin.gz", binary=True)
 
 
 class FeatureFile:
@@ -139,7 +140,6 @@ class FeatureFile:
         self.input = None
         self.mask = None
         self.output = None
-
         
 #-----------------------------------------------------------------------------
 
@@ -180,7 +180,7 @@ class SAPIENTATrainer(FeatureExtractorBase):
 class NNetTrainer(SAPIENTATrainer):
     """Specific implementation of SAPIENTA trainer that uses CRFSuite for training"""
 
-    def train(self, trainfiles):
+    def train(self, trainfiles, num_epochs=100):
         self.preprocess(trainfiles)
         
         net = SapientaNeuralNet(self.logger)
@@ -191,7 +191,34 @@ class NNetTrainer(SAPIENTATrainer):
             #for sent in sentences:
             net.add_training_doc(FeatureFile(file, self))      
             
-        net.train()          
+        net.train(self.modelFile, num_epochs=num_epochs)          
 
     #------------------------------------------------------------------------------------------------
     
+    def test(self, testfiles):
+                
+        net = SapientaNeuralNet(self.logger)
+        net.load(self.modelFile)
+        net.compile()
+        
+        correct = 0
+        all = 0
+        
+        for file in testfiles:
+            with FeatureFile(file,self) as f:
+                
+                for i,sentence in enumerate(net.label(f.input, f.mask)):
+                    label = (max(enumerate(sentence), key=lambda x:x[1]))
+                    actual = (max(enumerate(f.output[i]), key=lambda x:x[1]))
+                    
+                    print( ALL_CORESCS[label[0]] , "With {}% confidence".format(label[1]*100))
+                    print ("Actual label is {}".format(ALL_CORESCS[actual[0]]))
+                    
+                    all += 1
+                    
+                    if actual[0] == label[0]:
+                        correct += 1
+                    
+                    
+        print ("Got {} out of {} correct (That's {}%)".format(correct,all, correct/all*100))
+                    

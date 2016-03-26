@@ -7,6 +7,7 @@ import logging
 import os
 import pickle
 import spacy
+import csv
 
 import numpy as np
 
@@ -15,6 +16,7 @@ from gensim.models.word2vec import Word2Vec
 from sapienta.ml.nnet import SapientaNeuralNet, CONTEXT_WINDOW, WORDVEC_SIZE, ALL_CORESCS
 
 from sapienta.ml.wordserve import WordservClient
+from collections import Counter
 
 class FeatureExtractorBase:
     """This class has some reusable functions for extracting features
@@ -204,6 +206,10 @@ class NNetTrainer(SAPIENTATrainer):
         correct = 0
         all = 0
         
+        predLabels = []
+        trueLabels = []
+        
+        
         for file in testfiles:
             with FeatureFile(file,self) as f:
                 
@@ -211,14 +217,68 @@ class NNetTrainer(SAPIENTATrainer):
                     label = (max(enumerate(sentence), key=lambda x:x[1]))
                     actual = (max(enumerate(f.output[i]), key=lambda x:x[1]))
                     
-                    print( ALL_CORESCS[label[0]] , "With {}% confidence".format(label[1]*100))
-                    print ("Actual label is {}".format(ALL_CORESCS[actual[0]]))
+                    predLabels.append(ALL_CORESCS[label[0]])
+                    trueLabels.append(ALL_CORESCS[actual[0]])
                     
+                    self.logger.debug("%s With %d%% confidence", ALL_CORESCS[label[0]], label[1]*100)
+                    self.logger.debug("Actual label is %s", ALL_CORESCS[actual[0]])
+            
                     all += 1
                     
                     if actual[0] == label[0]:
                         correct += 1
                     
                     
-        print ("Got {} out of {} correct (That's {}%)".format(correct,all, correct/all*100))
+        self.logger.info("Got %d out of %d correct (That's %f%%)", correct,all, correct/all*100)
+        
+        return trueLabels, predLabels
+        
+        
+    def calcPrecRecall(self, trueLabels, predictedLabels):
+        
+        tp = Counter()
+        fp = Counter()
+        fn = Counter()
+        
+        for true, predicted in zip(trueLabels,predictedLabels):
+            if true == predicted:
+                tp[true] += 1
+            else:
+                fp[predicted] += 1
+                fn[true] += 1
+                
+        measures = {}
+        for label in ALL_CORESCS:
+            if tp[label] == 0:
+                prec = 0
+                rec = 0
+            else:
+                prec = tp[label] / (tp[label] + fp[label])
+                rec  = tp[label] / (tp[label] + fn[label])  
+                
+            if (prec + rec) > 0:
+                fm = (2 * prec * rec ) / (prec + rec)
+            else:
+                fm = 0
+            
+            measures[label] = (prec,rec,fm, tp[label], fp[label], fn[label])
+        
+        return measures        
+        
+    #------------------------------------------------------------------------------------------------
+    
+    def writePrecRecall(self, filename, trueLabels, predictedLabels):
+        
+        with open(filename,"w") as f:
+            
+            csvw = csv.writer(f)
+            # write header
+            csvw.writerow(['Label','Precision','Recall','F-Measure','True Positive', ' False Positive', 'False Negative'])
+            #calculate the measurements
+            measures = self.calcPrecRecall(trueLabels, predictedLabels)
+            #write measurements to disk
+            for label in measures:
+                csvw.writerow( [label] + list(measures[label]))
+        
+        
                     

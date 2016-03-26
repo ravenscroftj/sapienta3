@@ -59,17 +59,29 @@ class SapientaNeuralNet(object):
                             only_return_final=True,
                             nonlinearity=lasagne.nonlinearities.tanh)
         
+        l_lstm1_bac = LSTMLayer(self.in_layer, 
+                            num_units=100, 
+                            mask_input=self.i_mask, 
+                            only_return_final=True,
+                            backwards=True,
+                            nonlinearity=lasagne.nonlinearities.tanh)
+        
         self.lstm = l_lstm1
+        
+        l_combine = ElemwiseSumLayer([l_lstm1,l_lstm1_bac])
         
         self.logger.debug("LSTM layer shape: %s",lasagne.layers.get_output_shape(l_lstm1))
         
-        l_dropout1 = DropoutLayer(l_lstm1)
+        l_dropout1 = DropoutLayer(l_combine)
         
         l_shp1 = ReshapeLayer(l_dropout1, (1, batchsize, 100))
         
         l_lstm2 = LSTMLayer(l_shp1, num_units=50)
+        l_lstm2_bac = LSTMLayer(l_shp1, num_units=50, backwards=True)
+        
+        l_combine2 = ElemwiseSumLayer([l_lstm2,l_lstm2_bac])
 
-        l_shp2 = ReshapeLayer(l_lstm2, (batchsize,50))
+        l_shp2 = ReshapeLayer(l_combine2, (batchsize,50))
         
         #self.l_shp1 = l_shp1
 

@@ -8,6 +8,7 @@ import os
 import pickle
 import spacy
 import csv
+import re
 
 import numpy as np
 
@@ -68,6 +69,9 @@ class FeatureExtractorBase:
                 sentence.wordvectors = []
                 
                 words = sentence.content.split(" ")
+ 
+                
+                words = [ re.sub("[0-9]+(\.[0-9]+)", "##", w) for w in words ]
                 
                 vecs = self.wv.vector(words)
                 

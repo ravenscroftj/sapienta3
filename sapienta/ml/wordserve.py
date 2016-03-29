@@ -95,7 +95,7 @@ def main():
     
     print("Loading word vector - this might take a while...")
     
-    _wv = Word2Vec.load_word2vec_format("/opt/GoogleNews-vectors-negative300.bin.gz", binary=True)
+    _wv = Word2Vec.load_word2vec_format(args.vector_file, binary=True)
     
     app.run(port=args.port, debug=args.debug)
     

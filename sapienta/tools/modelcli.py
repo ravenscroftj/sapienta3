@@ -81,6 +81,9 @@ USAGE
         parser.add_argument("corpus_dir", action="store", help="Name of corpus directory to traverse")
         parser.add_argument("-e", "--epochs", action="store", type=int, default=100, help="Set the number of epochs to train for, default 100")
         
+        parser.add_argument("-r","--resultsfile", action="store", dest="results_file", default="results.csv", 
+                            help="In test mode name of CSV to dump results to. In crossval, name template to which the fold number is prepended. Defaults to results.csv")
+        
         
         #parser.add_argument(dest="paths", help="paths to folder(s) with source file(s) [default: %(default)s]", metavar="path", nargs='+')
         
@@ -150,7 +153,8 @@ USAGE
                 return -1
             
             
-            trainer.test(all_files)
+            trueLabels,predictedLabels = trainer.test(all_files)
+            trainer.writePrecRecall(args.results_file, trueLabels, predictedLabels)
             
 
         return 0

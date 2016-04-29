@@ -11,24 +11,24 @@ logger = logging.getLogger(__name__)
 def get_folds( inputfile ):
     """Get fold information from the given input CSV file"""
 
-    with open(inputfile, 'rb') as f:
+    with open(inputfile, 'r') as f:
         foldreader = csv.reader(f, delimiter=',', quotechar='"')
+        
+        rows = list(foldreader)
 
         #read the first row to detect how many folds there are
-        toprow = foldreader.next()
-
-        foldcount = len([x for x in toprow if x != ""])
+        foldcount = len([x for x in rows[0] if x != ""])
 
         logger.info("%d folds have been detected",foldcount)
         
         #read the next row and make sure the number of cells is divisable by folds
-        labels = foldreader.next()[1:]
+        labels = rows[1][1:]
 
         if len(labels) % foldcount != 0:
             logger.error("The number of labels doesn't factor with the number of folds")
             return None
 
-        cols = len(labels) / foldcount
+        cols = int(len(labels) / foldcount)
 
         logger.info("Detected %d information columns per fold", cols)
 
@@ -37,7 +37,8 @@ def get_folds( inputfile ):
         extracted = []
 
         #now read the rest of the rows
-        for row in foldreader:
+        for row in rows[2:]:
+            
             #we discount row[0] because that's just a file number
             foldinfos = row[1:]
             extracted.append( extract_fold_entries( foldinfos, foldcount, colnames ) )

@@ -21,6 +21,7 @@ import logging
 
 from argparse import ArgumentParser
 from argparse import RawDescriptionHelpFormatter
+from sapienta.ml.folds import get_folds
 
 __all__ = []
 __version__ = 0.1
@@ -42,6 +43,54 @@ class CLIError(Exception):
         return self.msg
     def __unicode__(self):
         return self.msg
+    
+    
+def generateFolds(corpusDir, foldsFile, logger=None):
+    
+    if logger == None:
+        logger = logging.getLogger(__name__)
+    
+    def genFileName(x):
+        if x['annotator'] != "":
+            return os.path.join(corpusDir, x['filename'] + 
+                                "_mode2." + x['annotator'] + ".xml") 
+        else:
+            return os.path.join(corpusDir, x['filename'] + 
+                                "_mode2.xml")
+
+
+    folds = get_folds(foldsFile)
+
+    allFiles =  [f for f in [ genFileName(fdict) 
+                for x in folds for fdict in x ] 
+                        if os.path.exists(f)]
+    
+    fixtures = []
+    
+    for f, fold in enumerate(folds):
+
+        testFiles = []
+        sents = 0
+        
+        for filedict in fold:
+            fname = genFileName(filedict)
+    
+            sents += int(filedict['total_sentence'])
+    
+            if not os.path.isfile(fname):
+                logger.warn("No file %s detected.", fname)
+            else:
+                testFiles.append(fname)
+    
+        logger.info("Fold %d has %d files and %d sentences total" + 
+                " (which will be excluded)", f, len(testFiles), sents)
+    
+        #calculate which files to use for training
+        trainFiles = [file for file in allFiles if file not in testFiles]
+    
+        fixtures.append( (testFiles, trainFiles) )
+        
+    return fixtures    
 
 def main(argv=None): # IGNORE:C0111
     '''Command line options.'''
@@ -124,13 +173,11 @@ USAGE
                     
         from sapienta.ml.train import NNetTrainer
         
-        trainer = NNetTrainer(args.model_name, os.path.join(args.corpus_dir, CACHEDIR))
         
-
-            
-
         
         if args.action == "train":
+            
+            trainer = NNetTrainer(args.model_name, os.path.join(args.corpus_dir, CACHEDIR))
             
             if args.model_name == None:
                 logging.error("Must specify name of model file to save trained model to")
@@ -144,6 +191,8 @@ USAGE
             
         if args.action == "test":
             
+            trainer = NNetTrainer(args.model_name, os.path.join(args.corpus_dir, CACHEDIR))
+            
             if args.model_name == None:
                 logging.error("Must specify name of model file to test")
                 return -1
@@ -156,6 +205,38 @@ USAGE
             trueLabels,predictedLabels = trainer.test(all_files)
             trainer.writePrecRecall(args.results_file, trueLabels, predictedLabels)
             
+        if args.action == "crossval":
+            
+            if args.folds_file == None:
+                logging.error("You must provide a folds file to train against")
+                return -1
+            
+            allTrue, allPredicted = [],[]
+            
+            for i, (testFiles, trainFiles) in enumerate(generateFolds(args.corpus_dir, args.folds_file)):
+                
+                
+                model_file = os.path.join(args.corpus_dir, "model_fold_{}.npz".format(i) )
+                results_file = os.path.join(args.corpus_dir,"results_fold_{}.csv".format(i))
+                
+                trainer = NNetTrainer(model_file, os.path.join(args.corpus_dir, CACHEDIR))
+                
+                
+                if os.path.exists(model_file):
+                    logging.warn("The model file %s already exists, refusing to overwrite. Skipping to test phase.", model_file)
+                else:
+                    trainer.train(trainFiles, args.epochs)
+                    
+                trueLabels,predictedLabels = trainer.test(testFiles)
+                
+                allTrue += trueLabels
+                allPredicted += predictedLabels
+                
+                trainer.writePrecRecall(results_file, trueLabels, predictedLabels)
+                
+            
+            results_file = os.path.join(args.corpus_dir,"results_micro_all.csv")      
+            trainer.writePrecRecall(results_file, allTrue, allPredicted)          
 
         return 0
     
